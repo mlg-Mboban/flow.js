@@ -861,6 +861,8 @@
             this.currentSpeed = 0;
             this.averageSpeed = 0;
             this.flowObj.fire('fileSuccess', this, message, chunk);
+          } else {
+            this.flowObj.fire('chunkSuccess', this, message, chunk);
           }
           break;
         case 'retry':
@@ -1239,7 +1241,11 @@
       var status = $.status();
       if (status === 'success' || status === 'error') {
         delete this.data;
-        $.event(status, $.message());
+        if (status === 'success') {
+          $.event(status, $.message(true));
+        } else {
+          $.event(status, $.message());
+        }
         $.flowObj.uploadNextChunk();
       } else {
         $.event('retry', $.message());
@@ -1300,13 +1306,13 @@
      * been uploaded in a previous session
      * @function
      */
-    test: function () {
+    test: async function () {
       // Set up request and listen for event
       this.xhr = new XMLHttpRequest();
       this.xhr.addEventListener("load", this.testHandler, false);
       this.xhr.addEventListener("error", this.testHandler, false);
-      var testMethod = evalOpts(this.flowObj.opts.testMethod, this.fileObj, this);
-      var data = this.prepareXhrRequest(testMethod, true);
+      var testMethod = await evalOpts(this.flowObj.opts.testMethod, this.fileObj, this);
+      var data = await this.prepareXhrRequest(testMethod, true);
       this.xhr.send(data);
     },
 
@@ -1338,7 +1344,7 @@
      * Uploads the actual data in a POST call
      * @function
      */
-    send: function () {
+    send: async function () {
       var preprocess = this.flowObj.opts.preprocess;
       var read = this.flowObj.opts.readFileFn;
       if (typeof preprocess === 'function') {
@@ -1374,8 +1380,8 @@
       this.xhr.addEventListener("load", this.doneHandler, false);
       this.xhr.addEventListener("error", this.doneHandler, false);
 
-      var uploadMethod = evalOpts(this.flowObj.opts.uploadMethod, this.fileObj, this);
-      var data = this.prepareXhrRequest(uploadMethod, false, this.flowObj.opts.method, this.bytes);
+      var uploadMethod = await evalOpts(this.flowObj.opts.uploadMethod, this.fileObj, this);
+      var data = await this.prepareXhrRequest(uploadMethod, false, this.flowObj.opts.method, this.bytes);
       this.xhr.send(data);
     },
 
@@ -1433,8 +1439,21 @@
      * @function
      * @returns {String}
      */
-    message: function () {
-      return this.xhr ? this.xhr.responseText : '';
+    message: function (returnHeaders) {
+      if (returnHeaders) {
+        if (this.xhr) {
+          var arr = this.xhr.getAllResponseHeaders().split('\r\n');
+          var headers = arr.reduce(function (acc, current, i){
+                var parts = current.split(': ');
+                acc[parts[0]] = parts[1];
+                return acc;
+          }, {});
+          return headers;
+        }
+        return '';
+      } else {
+        return this.xhr ? this.xhr.responseText : '';
+      }
     },
 
     /**
@@ -1478,12 +1497,12 @@
      * @param {Blob} [blob] to send
      * @returns {FormData|Blob|Null} data to send
      */
-    prepareXhrRequest: function(method, isTest, paramsMethod, blob) {
+    prepareXhrRequest: async function(method, isTest, paramsMethod, blob) {
       // Add data from the query options
-      var query = evalOpts(this.flowObj.opts.query, this.fileObj, this, isTest);
+      var query =  await evalOpts(this.flowObj.opts.query, this.fileObj, this, isTest);
       query = extend(query || {}, this.getParams());
 
-      var target = evalOpts(this.flowObj.opts.target, this.fileObj, this, isTest);
+      var target = await evalOpts(this.flowObj.opts.target, this.fileObj, this, isTest);
       var data = null;
       if (method === 'GET' || paramsMethod === 'octet') {
         // Add data from the query options
@@ -1495,18 +1514,19 @@
         data = blob || null;
       } else {
         // Add data from the query options
-        data = new FormData();
-        each(query, function (v, k) {
-          data.append(k, v);
-        });
-        if (typeof blob !== "undefined") data.append(this.flowObj.opts.fileParameterName, blob, this.fileObj.file.name);
+        // data = new FormData();
+        // each(query, function (v, k) {
+        //   data.append(k, v);
+        // });
+        // if (typeof blob !== "undefined") data.append(this.flowObj.opts.fileParameterName, blob, this.fileObj.file.name);
+        data = blob;
       }
 
       this.xhr.open(method, target, true);
       this.xhr.withCredentials = this.flowObj.opts.withCredentials;
 
       // Add data from header options
-      each(evalOpts(this.flowObj.opts.headers, this.fileObj, this, isTest), function (v, k) {
+      each(await evalOpts(this.flowObj.opts.headers, this.fileObj, this, isTest), function (v, k) {
         this.xhr.setRequestHeader(k, v);
       }, this);
 
@@ -1532,11 +1552,11 @@
    * @param {...} args arguments of a callback
    * @returns {*}
    */
-  function evalOpts(data, args) {
+  async function evalOpts(data, args) {
     if (typeof data === "function") {
       // `arguments` is an object, not array, in FF, so:
       args = Array.prototype.slice.call(arguments);
-      data = data.apply(null, args.slice(1));
+      data = await data.apply(null, args.slice(1));
     }
     return data;
   }
